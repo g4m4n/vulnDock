@@ -3,3 +3,4 @@
 
 # Excluir el propio repositorio Git (no tiene efecto en el repositorio actual)
 .git/
+.gitignore

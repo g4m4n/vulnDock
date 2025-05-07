@@ -1,0 +1,18 @@
+# Habilita mod_rewrite
+RewriteEngine On
+
+# Eliminar la extensión .php y redirigir internamente
+# Ejemplo: /api/v1/login -> /api/v1/login.php
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME}.php -f
+RewriteRule ^(.*)$ $1.php [L,QSA]
+
+# Bloquear el acceso directo a la carpeta 'api' desde el navegador
+<Directory "/var/www/html/api">
+    Require all denied
+</Directory>
+
+# Si estás en un entorno sin acceso a <Directory>, puedes usar esto en su lugar:
+# Bloquear acceso directo al directorio 'api'
+RewriteRule ^api/ - [F,L]
