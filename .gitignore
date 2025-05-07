@@ -1,6 +1,0 @@
-# Excluir configuración específica de Visual Studio Code
-.vscode/
-
-# Excluir el propio repositorio Git (no tiene efecto en el repositorio actual)
-.git/
-.gitignore
