@@ -1,0 +1,20 @@
+# Usa la imagen oficial de Python 3
+FROM python:3-slim
+
+# Establece el directorio de trabajo en el contenedor
+WORKDIR /app
+
+# Copia el archivo de requisitos (si tienes dependencias adicionales)
+COPY ../PythonWebApp/ .
+
+# Instala las dependencias
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copia el contenido de la carpeta Frontend a la carpeta 'public' dentro del contenedor (sin la carpeta en sí)
+COPY ../Frontend/ .
+
+# Expone el puerto 80 (el mismo que usas en Flask)
+EXPOSE 80
+
+# Define el comando para ejecutar la aplicación con Gunicorn
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:80", "app:app"]

@@ -1,0 +1,5 @@
+User    Company     Credit Card Number   Expiry Date 
+Alex        Amex	       374245455400126	    05/2026			
+Bob         Cabal1	       6271701225979642	    03/2026		
+Lisa        Cencosud1	   6034932528973614	    06/2026		
+David       China Union    6250941006528599	    06/2026		

@@ -1,0 +1,31 @@
+version: '3'
+
+services:  
+  db:
+    image: mysql:latest
+    container_name: mysql-blog-container
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: web_app
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_password
+    volumes:
+      - ./database/mysql/create_tables.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - mynetwork  # Definimos la misma red para que puedan comunicarse
+
+  web:
+    build: 
+      context: .
+      dockerfile: Docker/DockerfileJava
+    ports:
+      - "80:8080"
+    depends_on:
+      - db
+    networks:
+      - mynetwork
+networks:
+  mynetwork:
+    driver: bridge  # Usamos la red por defecto de Docker
