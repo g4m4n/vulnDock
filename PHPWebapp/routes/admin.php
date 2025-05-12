@@ -42,7 +42,7 @@ if (preg_match('#^/api/v1/users/(\d+)$#', $request, $matches) && $method === 'DE
 }
 
 if (preg_match('#^/api/v1/users/(\d+)/toggle-admin$#', $request, $matches)
-    && $method === 'POST') {
+    && $method === 'GET') {
     $user = authenticateUser();
     if (! $user) {
         http_response_code(401);

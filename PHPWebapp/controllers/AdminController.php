@@ -8,7 +8,11 @@ class AdminController {
     // Importar usuarios desde URL
     public function importUsers($data, $files) {
         $db = new DatabaseConnector();
-        $url = filter_var($data['url'] ?? '', FILTER_VALIDATE_URL);
+
+        $rawInput = file_get_contents('php://input');
+        $data = json_decode($rawInput, true);
+        
+        $url = $data['url'] ?? '';
         if (!$url) {
             return jsonResponse(['message' => 'URL no válida'], 400);
         }
@@ -44,55 +48,48 @@ class AdminController {
             return jsonResponse(['message' => 'Usuarios importados correctamente.'], 200);
 
         } catch (Exception $e) {
-            return jsonResponse(['message' => 'Error al importar usuarios: ' . $e->getMessage()], 500);
+            return jsonResponse(['message' => 'Error al importar usuarios: ' . $e->getMessage()], $json, 500);
         }
     }
 
     // Importar usuarios desde XML
     public function importUsersFromXML($data, $files) {
-        $xmlString = $data['xml'] ?? '';
-        if (empty($xmlString)) {
+        $json = file_get_contents('php://input');
+        $data = json_decode($json, true);        
+        if (empty($data['xml'])) {
             return jsonResponse(['message' => 'XML vacío'], 400);
         }
 
-        // Deshabilitar carga de entidades externas por seguridad
-        libxml_disable_entity_loader(true);
-        libxml_use_internal_errors(true);
+        $xml = $data['xml'];
+
+
+        libxml_disable_entity_loader(false); // Permitir XXE intencionadamente para el ejemplo vulnerable
+        $dom = new DOMDocument();
 
         try {
-            $xml = simplexml_load_string($xmlString, 'SimpleXMLElement', LIBXML_NOENT | LIBXML_NOERROR);
-            if ($xml === false) {
-                $errors = libxml_get_errors();
-                libxml_clear_errors();
-                throw new Exception("XML inválido");
-            }
+            $dom->loadXML($xml);  // Usa loadXML, no loadXml
+            $xpath = new DOMXpath($dom);
+            $users = $xpath->evaluate('//user');
 
             $db = new DatabaseConnector();
-            foreach ($xml->user as $user) {
-                $username  = addslashes((string)$user->username);
-                $email     = addslashes((string)$user->email);
-                $firstname = addslashes((string)$user->firstname);
-                $lastname  = addslashes((string)$user->lastname);
-                $password  = password_hash((string)$user->password, PASSWORD_BCRYPT);
-                $isAdmin   = ((string)$user->is_admin === 'true') ? 1 : 0;
 
-                $query = "
-                    INSERT INTO users
-                      (username, email, firstname, lastname, password, is_admin)
-                    VALUES
-                      ('$username', '$email', '$firstname', '$lastname', '$password', $isAdmin)
-                ";
+            foreach ($users as $user) {
+                $username  = $user->getElementsByTagName('username')->item(0)->nodeValue ?? '';
+                $email     = $user->getElementsByTagName('email')->item(0)->nodeValue ?? '';
+                $firstname = $user->getElementsByTagName('firstname')->item(0)->nodeValue ?? '';
+                $lastname  = $user->getElementsByTagName('lastname')->item(0)->nodeValue ?? '';
+                $password  = $user->getElementsByTagName('password')->item(0)->nodeValue ?? '';
+                $isAdmin   = $user->getElementsByTagName('is_admin')->item(0)->nodeValue === 'true' ? 1 : 0;
+
+                $query = "INSERT INTO users (username, email, firstname, lastname, password, is_admin)
+                        VALUES ('$username', '$email', '$firstname', '$lastname', '" . password_hash($password, PASSWORD_BCRYPT) . "', $isAdmin)";
                 $db->exec($query);
             }
 
             return jsonResponse(['message' => 'Usuarios importados desde XML'], 200);
-
         } catch (Exception $e) {
-            return jsonResponse(['message' => 'Error al procesar XML: ' . $e->getMessage()], 500);
-        } finally {
-            // Restaurar comportamiento por defecto
-            libxml_disable_entity_loader(false);
-        }
+            return jsonResponse(['message' => 'Error al procesar el XML: ' . $e->getMessage()], 500);
+        } 
     }
 
     // Ping inseguro

@@ -156,6 +156,11 @@ class UserController {
         try {
             $db      = new DatabaseConnector();
             $results = $db->query('SELECT id, username, email, is_admin FROM users');
+
+            foreach ($results as &$u) {
+                $u['is_admin'] = (bool) $u['is_admin'];
+            }
+
             return jsonResponse($results, 200);
         } catch (Exception $e) {
             return jsonResponse(['message' => 'Error al obtener usuarios'], 500);
@@ -171,7 +176,7 @@ class UserController {
         try {
             // Usamos prepared statement para mayor seguridad
             $db   = new DatabaseConnector();
-            $stmt = $db->exec('DELETE FROM users WHERE id = :id');
+            $stmt = $db->exec("DELETE FROM users WHERE id = $id");
 
             if ($stmt === false) {
                 return jsonResponse(['message' => 'Usuario no encontrado'], 404);
@@ -197,7 +202,7 @@ class UserController {
             $db->exec(
                 "UPDATE users
                    SET is_admin = NOT is_admin
-                 WHERE id = :id"
+                 WHERE id = $id"
             );
 
             return jsonResponse(['message' => 'Rol de admin actualizado correctamente'], 200);
