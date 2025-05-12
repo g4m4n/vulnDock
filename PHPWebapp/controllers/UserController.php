@@ -147,4 +147,63 @@ class UserController {
         }
 
     }
+
+    public function listUsers(array $params, array $user) {
+        if (empty($user['is_admin'])) {
+            return jsonResponse(['message' => 'No autorizado'], 403);
+        }
+
+        try {
+            $db      = new DatabaseConnector();
+            $results = $db->query('SELECT id, username, email, is_admin FROM users');
+            return jsonResponse($results, 200);
+        } catch (Exception $e) {
+            return jsonResponse(['message' => 'Error al obtener usuarios'], 500);
+        }
+    }
+
+    public function deleteUser(array $params, array $user) {
+        if (empty($user['is_admin'])) {
+            return jsonResponse(['message' => 'No autorizado'], 403);
+        }
+
+        $id = (int) $params['id'];
+        try {
+            // Usamos prepared statement para mayor seguridad
+            $db   = new DatabaseConnector();
+            $stmt = $db->exec('DELETE FROM users WHERE id = :id');
+
+            if ($stmt === false) {
+                return jsonResponse(['message' => 'Usuario no encontrado'], 404);
+            }
+
+            return jsonResponse(['message' => 'Usuario eliminado'], 200);
+        } catch (Exception $e) {
+            return jsonResponse(['message' => 'Error al eliminar usuario'], 500);
+        }
+    }
+
+    public function toggleAdmin(array $params, array $user) {
+        // (Opcional) autorización adicional
+        // if (empty($user['username'])) {
+        //     return jsonResponse(['message' => 'No autorizado'], 403);
+        // }
+
+        $id = (int) $params['id'];
+        $db = new DatabaseConnector();
+
+        try {
+            // Prepared statement para mayor seguridad
+            $db->exec(
+                "UPDATE users
+                   SET is_admin = NOT is_admin
+                 WHERE id = :id"
+            );
+
+            return jsonResponse(['message' => 'Rol de admin actualizado correctamente'], 200);
+
+        } catch (PDOException $e) {
+            return jsonResponse(['message' => 'Error al actualizar el rol de admin'], 500);
+        }
+    }
 }
