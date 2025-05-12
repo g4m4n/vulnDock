@@ -1,0 +1,21 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # No reescribir peticiones reales a archivos y directorios
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+
+  # Excluir rutas de la API (que no deben pasar por reescritura)
+  RewriteCond %{REQUEST_URI} !^/api/
+
+  # Reescribir URLs que no tengan .html al archivo correspondiente
+  RewriteCond %{DOCUMENT_ROOT}/$1.html -f
+  RewriteRule ^([a-zA-Z0-9_-]+)$ $1.html [L]
+
+  # Reescribir cualquier URL /blog/{id} a blog-details.html
+  RewriteRule ^blog/([0-9]+)$ /blog-details.html [L]
+
+</IfModule>
+
+# Asegura que index.html sea la página por defecto
+DirectoryIndex index.html

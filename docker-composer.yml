@@ -3,7 +3,7 @@ version: '3'
 services:  
   db:
     image: mysql:latest
-    container_name: mysql-blog-container
+    container_name: vulndock-db
     ports:
       - "3306:3306"
     environment:
@@ -17,11 +17,12 @@ services:
       - mynetwork  # Definimos la misma red para que puedan comunicarse
 
   web:
+    container_name: vulndock-web
     build: 
       context: .
-      dockerfile: Docker/DockerfileJava
+      dockerfile: Docker/DockerfilePHP
     ports:
-      - "80:8080"
+      - "80:80"
     depends_on:
       - db
     networks:

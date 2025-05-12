@@ -1,0 +1,6 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Redirigir todas las solicitudes a index.php para ser manejadas por la API
+  RewriteRule ^(.*)$ index.php [L]
+</IfModule>
