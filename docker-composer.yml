@@ -20,7 +20,7 @@ services:
     container_name: vulndock-web
     build: 
       context: .
-      dockerfile: Docker/DockerfilePHP
+      dockerfile: Docker/DockerfilePHPWin
     ports:
       - "80:80"
     depends_on:

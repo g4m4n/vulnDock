@@ -1,0 +1,44 @@
+# Offical Image for OpenJDK
+FROM openjdk:25-windowsservercore AS build
+
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop';"]
+
+# Maven Installation
+
+RUN New-Item -Path 'C:\\tmp' -ItemType Directory 
+RUN New-Item -Path 'C:\\tools' -ItemType Directory 
+RUN powershell -Command "Invoke-WebRequest https://downloads.apache.org/maven/maven-3/3.9.6/binaries/apache-maven-3.9.6-bin.zip -OutFile C:\\tmp\\maven.zip"
+
+RUN Expand-Archive -Path C:\\tmp\\maven.zip -DestinationPath C:\\tools\\ ; \
+    $mvnFolder = Get-ChildItem -Path C:\\tools\\ | Where-Object { $_.Name -like 'apache-maven-*' -and $_.PSIsContainer }; \
+    Rename-Item -Path $mvnFolder.FullName -NewName 'maven'
+
+ENV MAVEN_HOME="C:\\tools\\maven"
+ENV PATH="C:\\tools\\maven\\bin;C:\\Program Files\\Java\\jdk-1.8\\bin;%PATH%"
+
+SHELL ["cmd", "/S", "/C"]
+
+# Compile
+RUN dir "C:\openjdk-25\bin\java.exe"
+RUN C:\\tools\\maven\\bin\\mvn -v
+WORKDIR C:\\build
+COPY JavaWebapp/app/pom.xml pom.xml
+RUN C:\\tools\\maven\\bin\\mvn dependency:go-offline
+COPY JavaWebapp/app/src src
+RUN C:\\tools\\maven\\bin\\mvn clean package -DskipTests
+
+# Execution Webapp
+
+WORKDIR C:\\app
+
+# Copy the jar file
+RUN copy C:\build\target\app-0.0.1-SNAPSHOT.jar C:\app\app.jar
+
+# Copy frontend files
+COPY Frontend/ .
+
+# Expose port 80
+EXPOSE 8080
+
+# Lanzar la aplicación
+ENTRYPOINT ["cmd", "/S", "/C", "C:\\openjdk-25\\bin\\java.exe -jar C:\\app\\app.jar"]
