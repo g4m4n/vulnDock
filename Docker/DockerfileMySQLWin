@@ -1,0 +1,39 @@
+# Windows Image MySQL
+FROM  mcr.microsoft.com/windows/servercore:ltsc2019
+
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+# Environment variables
+ENV VERSION=9.2.0 
+ENV MYSQL_ROOT_PASSWORD=root
+ENV MYSQL_DATABASE=web_app
+ENV MYSQL_USER=app_user
+ENV MYSQL_PASSWORD=app_password
+ENV MYSQL_INSTALL_PATH=C:\\mysql
+ENV INIT_SQL_PATH=C:\\init.sql
+
+# Install VSC++ Redistributable
+RUN Invoke-WebRequest   -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "C:\\vc_redist.x64.exe" ; \
+  Start-Process -FilePath "C:\\vc_redist.x64.exe" -ArgumentList "/install", "/quiet", "/norestart" -Wait ; \
+  Remove-Item "C:\\vc_redist.x64.exe"
+
+# Download and install in silence mode
+RUN $headers = @{ 'Accept' = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'; 'Accept-Encoding' = 'gzip, deflate, br' }; \
+    Invoke-WebRequest $('https://downloads.mysql.com/archives/get/p/23/file/mysql-{0}-winx64.zip' -f $env:VERSION) -OutFile 'mysql.zip' -UseBasicParsing -Headers $headers ; \
+    Expand-Archive -Path 'mysql.zip' -DestinationPath 'C:\' ; \
+    Rename-Item -Path $('C:\mysql-{0}-winx64' -f $env:VERSION) -NewName 'mysql' ; \
+    Remove-Item 'mysql.zip' 
+
+WORKDIR $MYSQL_INSTALL_PATH
+COPY create_tables.sql $INIT_SQL_PATH
+
+EXPOSE 3306
+
+CMD ["powershell", "-Command", " \
+    .\\bin\\mysqld.exe --initialize-insecure --basedir=$env:MYSQL_INSTALL_PATH --datadir=$env:MYSQL_INSTALL_PATH\\data; \
+    Start-Process -FilePath .\\bin\\mysqld.exe -ArgumentList '--console','--explicit_defaults_for_timestamp' -NoNewWindow -PassThru | Out-Null; \
+    Start-Sleep -Seconds 15; \
+    .\\bin\\mysqladmin.exe -u root password $env:MYSQL_ROOT_PASSWORD; \
+    .\\bin\\mysql.exe -u root --password=$env:MYSQL_ROOT_PASSWORD -e \"CREATE DATABASE IF NOT EXISTS $env:MYSQL_DATABASE; CREATE USER IF NOT EXISTS '$env:MYSQL_USER'@'%' IDENTIFIED BY '$env:MYSQL_PASSWORD'; GRANT ALL PRIVILEGES ON $env:MYSQL_DATABASE.* TO '$env:MYSQL_USER'@'%'; FLUSH PRIVILEGES;\"; \
+    .\\bin\\mysql.exe -u root \"-p$env:MYSQL_ROOT_PASSWORD\" $env:MYSQL_DATABASE -e \"source $env:INIT_SQL_PATH\"; \
+    Wait-Process -Name mysqld"]

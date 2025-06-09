@@ -1,0 +1,36 @@
+# Docker Image for PostgreSQL on Windows
+FROM mcr.microsoft.com/windows/servercore:ltsc2019
+
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+ENV VERSION=17.5-1 
+ENV PGDATA=C:\\pgdata 
+ENV POSTGRES_INSTALL=C:\\pgsql 
+ENV POSTGRES_PASSWORD=admin 
+ENV POSTGRES_USER=admin 
+ENV POSTGRES_DB=web_app 
+ENV INIT_SQL_PATH=C:\\init.sql
+
+RUN Invoke-WebRequest $('http://get.enterprisedb.com/postgresql/postgresql-{0}-windows-x64-binaries.zip' -f $env:VERSION) -OutFile 'postgres.zip' -UseBasicParsing ; \
+    Expand-Archive postgres.zip -DestinationPath C:\ ; \
+    Remove-Item postgres.zip
+
+# Install VSC++ Redistributable
+RUN Invoke-WebRequest   -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "C:\\vc_redist.x64.exe" ; \
+  Start-Process -FilePath "C:\\vc_redist.x64.exe" -ArgumentList "/install", "/quiet", "/norestart" -Wait ; \
+  Remove-Item "C:\\vc_redist.x64.exe"
+
+WORKDIR $POSTGRES_INSTALL
+COPY create_tables.sql $INIT_SQL_PATH
+
+EXPOSE 5432
+
+CMD ["powershell", "-Command", "\
+    $env:POSTGRES_PASSWORD | Out-File -Encoding ASCII -NoNewline C:\\pgpass.txt ; \
+    .\\bin\\initdb.exe -D $env:PGDATA --username=$env:POSTGRES_USER --pwfile=C:\\pgpass.txt ; \
+    Start-Process -FilePath .\\bin\\pg_ctl.exe -ArgumentList 'start','-D',$env:PGDATA,'-w' -NoNewWindow -PassThru | Out-Null; \
+    Start-Sleep -Seconds 10; \
+    .\\bin\\psql.exe -U $env:POSTGRES_USER -d postgres -c \"CREATE DATABASE $env:POSTGRES_DB; \" ; \
+    .\\bin\\psql.exe -U $env:POSTGRES_USER -d $env:POSTGRES_DB -f $env:INIT_SQL_PATH; \
+    Wait-Process -Name postgres \
+"]
