@@ -1,0 +1,14 @@
+# Usamos la imagen oficial de MySQL
+FROM mysql:latest
+
+# Variables de entorno para la configuración de MySQL
+ENV MYSQL_ROOT_PASSWORD=root
+ENV MYSQL_DATABASE=web_app
+ENV MYSQL_USER=app_user
+ENV MYSQL_PASSWORD=app_password
+
+# Copiamos el script SQL para la inicialización en la carpeta adecuada
+COPY ../database/mysql/create_tables.sql /docker-entrypoint-initdb.d/init.sql
+
+# Exponemos el puerto 3306
+EXPOSE 3306

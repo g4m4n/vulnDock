@@ -18,23 +18,47 @@ RUN Invoke-WebRequest   -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -O
   Start-Process -FilePath "C:\\vc_redist.x64.exe" -ArgumentList "/install", "/quiet", "/norestart" -Wait ; \
   Remove-Item "C:\\vc_redist.x64.exe"
 
+# Instalar URL Rewrite Module
+RUN Invoke-WebRequest -Uri "https://download.microsoft.com/download/1/2/8/128E2E22-C1B9-44A4-BE2A-5859ED1D4592/rewrite_amd64_en-US.msi" -OutFile "rewrite.msi" ; \
+    Start-Process msiexec.exe -ArgumentList '/i', 'rewrite.msi', '/quiet', '/norestart' -Wait ; \
+    Remove-Item "rewrite.msi"
+
+
 # --- COPIAR PHP.INI DE EJEMPLO ---
 RUN Copy-Item "$env:PHP_DIR\\php.ini-development" "$env:PHP_DIR\\php.ini"
 
+RUN $content = Get-Content C:\php\php.ini ; \
+    $content = $content -replace ';?cgi\.force_redirect\s*=.*', 'cgi.force_redirect = 0' ; \
+    $content = $content -replace ';?fastcgi\.impersonate\s*=.*', 'fastcgi.impersonate = 1' ; \
+    $content = $content -replace ';?extension_dir\s*=.*', 'extension_dir = "ext"' ; \
+    $content = $content -replace ';extension=(json|mysqli|mbstring|fileinfo|pdo_mysql)', 'extension=$1' ; \
+    Set-Content C:\php\php.ini $content
+
+RUN icacls C:\php\php-cgi.exe /grant "IIS_IUSRS:RX"
+
+
 # --- CONFIGURAR IIS PARA PHP ---
-RUN Import-Module WebAdministration ; \
-    New-Item -Path IIS:\AppPools\PHPAppPool ; \
-    Set-ItemProperty 'IIS:\AppPools\PHPAppPool' -Name managedRuntimeVersion -Value '' ; \
-    Set-ItemProperty 'IIS:\AppPools\PHPAppPool' -Name enable32BitAppOnWin64 -Value False ; \
+RUN Import-Module WebAdministration; \
+    if (-not (Test-Path IIS:\AppPools\PHPAppPool)) { \
+        New-Item IIS:\AppPools\PHPAppPool; \
+    }; \
+    Install-WindowsFeature Web-CGI ; \
+    Set-ItemProperty 'IIS:\AppPools\PHPAppPool' -Name managedRuntimeVersion -Value ''; \
+    Set-ItemProperty 'IIS:\AppPools\PHPAppPool' -Name enable32BitAppOnWin64 -Value $true ; \
     Set-ItemProperty 'IIS:\Sites\Default Web Site' -Name applicationPool -Value 'PHPAppPool' ; \
-    Add-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter 'system.webServer/fastCgi' -name '.' -value @{fullPath='C:\php\php-cgi.exe'} ; \ 
-    Set-Content -Path 'C:\inetpub\wwwroot\index.php' -Value '<?php phpinfo(); ?>' ; \
-    Add-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/defaultDocument/files" -Name "." -Value @{value='index.php'}
+    New-WebHandler -Name 'PHP-FastCGI' -Path '*.php' -Verb '*' -Modules 'FastCgiModule' -ScriptProcessor 'C:\\php\\php-cgi.exe' -ResourceType 'Either' ; \
+    Add-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter 'system.webServer/fastCgi' -name '.' -value @{fullPath='C:\\php\\php-cgi.exe'} ; \
+    #Add-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter 'system.webServer/fastCgi' -name '.' -value @{fullPath='C:\php\php-cgi.exe'; arguments=''; environmentVariables=@(@{name='PHPRC'; value='C:\php'})}; \
+    Add-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter 'system.webServer/defaultDocument/files' -name '.' -value @{value='index.php'}
+
+
 
 # Copy the files to the container
 COPY Frontend/public/ C:/inetpub/wwwroot/
 COPY PHPWebapp/ C:/inetpub/wwwroot/api/
 COPY PHPWebapp/web.config C:/inetpub/wwwroot/web.config
+COPY PHPWebapp/webapi.config C:/inetpub/wwwroot/api/web.config
+COPY PHPWebapp/test.php C:/inetpub/wwwroot/info.php
 
 EXPOSE 80
 
