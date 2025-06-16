@@ -1,8 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const mysql = require('mysql2');
 const cors = require('cors');
 const xml2js = require('xml2js'); 
 const path = require('path');
@@ -12,26 +10,12 @@ const cookieParser = require('cookie-parser');
 const fs = require('fs');
 const pug = require('pug');
 const { exec } = require('child_process');
+const { insertUser, getUserByUsername, queryDb } = require('./DatabaseConnector');
+
 
 
 const app = express();
 const port = 80;
-
-// Configuración de la base de datos
-const db = mysql.createConnection({
-  host: 'localhost',
-  user: 'app_user',
-  password: 'app_password',
-  database: 'web_app'
-});
-
-db.connect((err) => {
-  if (err) {
-      console.error('Error de conexión a la base de datos: ', err.stack);
-      return;
-  }
-  console.log('Conectado a la base de datos');
-});
 
 // Configuración de CORS
 const corsOptions = {
@@ -154,45 +138,34 @@ app.post('/api/v1/register', upload.single('avatar'), async (req, res) => {
       // Guardar la información del avatar
       const avatarPath = `/images/avatars/${req.file.filename}`;
 
-      // Insertar en la base de datos
-      const query = `
-          INSERT INTO users (username, firstname, lastname, email, password, avatar)
-          VALUES (?, ?, ?, ?, ?, ?)
-      `;
+      const result = await insertUser(username, firstname, lastname, email, hashedPassword, avatarPath);
 
-      //CAMBIAR
-      //const username = `${firstname.toLowerCase()}_${Date.now()}`; // Generar un username único 
-      //Cambiado para que el usuario pueda elegir su nombre de usuario
-      db.query(query, [username, firstname, lastname, email, hashedPassword, avatarPath], (err, result) => {
-          if (err) {
-              console.error('Error al insertar el usuario en la base de datos:', err);
-              return res.status(500).json({ message: 'Error al registrar el usuario.' });
-          }
-
-          console.log('Usuario registrado con éxito:', { id: result.insertId, username, firstname, lastname, email });
-          res.status(201).json({
-              message: 'Usuario registrado exitosamente.',
-              user: { id: result.insertId, username, firstname, lastname, email, avatar: avatarPath },
-          });
-      });
-  } catch (error) {
-      console.error('Error en el registro:', error);
-      res.status(500).json({ message: 'Error interno del servidor.' });
-  }
-});
+      if (result) {
+        res.status(201).json({
+          message: 'Usuario registrado exitosamente.',
+          user: { id: result.insertId, username, firstname, lastname, email, avatar: avatarPath },
+        });
+      } else {
+        res.status(500).json({ message: 'Error al registrar el usuario.' });
+      }
+    } catch (error) {
+        console.error('Error en el registro:', error);
+        res.status(500).json({ message: 'Error interno del servidor.' });
+    }
+  });
 
 // Login con autenticación por cookie
-app.post('/api/v1/login', (req, res) => {
+app.post('/api/v1/login', async(req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ message: 'Ingrese usuario y contraseña' });
   }
 
-  db.query('SELECT * FROM users WHERE username = ?', [username], async (err, results) => {
-    if (err) return res.status(500).json({ message: 'Error interno del servidor' });
+  try {
+    const results = await getUserByUsername(username);
 
-    if (results.length === 0) {
+    if (!results || results.length === 0) {
       return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
     }
 
@@ -210,176 +183,171 @@ app.post('/api/v1/login', (req, res) => {
       httpOnly: false,
       secure: true,
       sameSite: 'Strict',
-      maxAge: 60 * 60 * 1000 // 1 hora
+      maxAge: 60 * 60 * 1000
     });
 
     res.json({ message: 'Login exitoso', user });
-  });
+  } catch (err) {
+    console.error('Error en login:', err);
+    res.status(500).json({ message: 'Error interno del servidor' });
+  }
 });
 
 
 // Obtener datos del usuario autenticado
-app.get('/api/v1/user/me', authenticateUser, (req, res) => {
+app.get('/api/v1/user/me', authenticateUser, async(req, res) => {
 
   if (!req.user) return res.status(401).json({ message: 'No autenticado' });
   const userId = req.user.id;
 
-  db.query('SELECT id, username, firstname, lastname, email, avatar FROM users WHERE id = ?', [userId], (err, results) => {
-    if (err) return res.status(500).json({ message: 'Error al obtener los datos' });
+ try {
+    const query = `SELECT id, username, firstname, lastname, email, avatar FROM users WHERE id = ?`;
+    const results = await queryDb(query, [userId]);
 
-    if (results.length === 0) return res.status(404).json({ message: 'Usuario no encontrado' });
+    if (!results || results.length === 0) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
 
     res.json(results[0]);
-  });
+  } catch (err) {
+    console.error('Error al obtener usuario:', err);
+    res.status(500).json({ message: 'Error al obtener los datos' });
+  }
 });
 
-// Ruta para actualizar el perfil y avatar
 app.post('/api/v1/update-profile', authenticateUser, upload.single('avatar'), async (req, res) => {
   const { firstName, lastName, email, newPassword } = req.body;
   const avatarPath = req.file ? `/images/avatars/${req.file.filename}` : null;
-  // Verificar si el usuario está autenticado
-  if (!req.user) {
-      return res.status(401).json({ message: 'No autenticado' });
+
+  if (!req.user) return res.status(401).json({ message: 'No autenticado' });
+
+  if (!firstName || !lastName || !email) {
+    return res.status(400).json({ message: 'Nombre, Apellidos y Correo son obligatorios.' });
   }
 
   const userId = req.user.id;
+  let query = `UPDATE users SET firstname = ?, lastname = ?, email = ?`;
+  const updateFields = [firstName, lastName, email];
 
-  // Validar los datos de entrada
-  if (!firstName || !lastName || !email) {
-      return res.status(400).json({ message: 'Nombre, Apellidos y Correo son obligatorios.' });
-  }
+  try {
+    if (newPassword) {
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      query += `, password = ?`;
+      updateFields.push(hashedPassword);
+    }
 
-  let updateFields = [firstName, lastName, email];
-  let query = `
-      UPDATE users
-      SET firstname = ?, lastname = ?, email = ?
-  `;
-
-  // Solo agregar la nueva contraseña si fue proporcionada
-  if (newPassword) {
-      try {
-          // Encriptar la nueva contraseña
-          const hashedPassword = await bcrypt.hash(newPassword, 10);
-          query += `, password = ?`;
-          updateFields.push(hashedPassword);
-      } catch (error) {
-          console.error('Error al encriptar la contraseña:', error);
-          return res.status(500).json({ message: 'Error al encriptar la contraseña.' });
-      }
-  }
-
-  // Si se sube una imagen, actualizar el avatar
-  if (avatarPath) {
+    if (avatarPath) {
       query += `, avatar = ?`;
       updateFields.push(avatarPath);
+    }
+
+    query += ` WHERE id = ?`;
+    updateFields.push(userId);
+
+    const result = await queryDb(query, updateFields);
+
+    if (!result || result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    res.json({ message: 'Perfil actualizado con éxito' });
+  } catch (err) {
+    console.error('Error al actualizar el perfil:', err);
+    res.status(500).json({ message: 'Error al actualizar el perfil' });
   }
-
-  query += ` WHERE id = ?`;
-  updateFields.push(userId);
-
-  // Ejecutar la consulta
-  db.query(query, updateFields, (err, result) => {
-      if (err) {
-          console.error('Error al actualizar el perfil:', err);
-          return res.status(500).json({ message: 'Error al actualizar el perfil' });
-      }
-
-      if (result.affectedRows === 0) {
-          return res.status(404).json({ message: 'Usuario no encontrado' });
-      }
-
-      res.json({ message: 'Perfil actualizado con éxito' });
-  });
 });
 
-// Listar usuarios (solo admin)
-app.get('/api/v1/users', authenticateUser, (req, res) => {
+// List users (only for admins)
+app.get('/api/v1/users', authenticateUser, async (req, res) => {
   if (!req.user.is_admin) return res.status(403).json({ message: 'No autorizado' });
 
-  db.query('SELECT id, username, email, is_admin FROM users', (err, results) => {
-    if (err) return res.status(500).json({ message: 'Error al obtener usuarios' });
+  try {
+    const results = await queryDb('SELECT id, username, email, is_admin FROM users');
     res.json(results);
-  });
+  } catch (err) {
+    res.status(500).json({ message: 'Error al obtener usuarios' });
+  }
 });
 
-// Cambiar estado de admin a un usuario
-app.get('/api/v1/users/:id/toggle-admin', authenticateUser, (req, res) => {
-  //if (!req.user.username) return res.status(403).json({ message: 'No autorizado' });
- // Actualizar el rol directamente: si es 1 (admin), lo pone en 0, si es 0 (no admin), lo pone en 1
- db.query(
-  `UPDATE users SET is_admin = NOT is_admin WHERE id = ?`,
-  [req.params.id],
-  (err, result) => {
-    if (err) return res.status(500).json({ message: 'Error al actualizar el rol de admin' });
-    
+// Switch user role to admin or user
+app.get('/api/v1/users/:id/toggle-admin', authenticateUser, async (req, res) => {
+  try {
+    const result = await queryDb('UPDATE users SET is_admin = NOT is_admin WHERE id = ?', [req.params.id]);
+
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
     }
 
     res.json({ message: 'Rol de admin actualizado correctamente' });
+  } catch (err) {
+    res.status(500).json({ message: 'Error al actualizar el rol de admin' });
   }
-);
 });
 
-// Eliminar usuario
-app.delete('/api/v1/users/:id', authenticateUser, (req, res) => {
+// Delete user (only for admins)
+app.delete('/api/v1/users/:id', authenticateUser, async (req, res) => {
   if (!req.user.is_admin) return res.status(403).json({ message: 'No autorizado' });
 
-  db.query('DELETE FROM users WHERE id = ?', [req.params.id], (err) => {
-    if (err) return res.status(500).json({ message: 'Error al eliminar usuario' });
+  try {
+    await queryDb('DELETE FROM users WHERE id = ?', [req.params.id]);
     res.json({ message: 'Usuario eliminado' });
-  });
+  } catch (err) {
+    res.status(500).json({ message: 'Error al eliminar usuario' });
+  }
 });
 
-// Importar usuarios desde URL (SSRF vulnerable)
+// Import users from JSON URL (vulnerable to SSRF) 
 app.post('/api/v1/users/import', authenticateUser, async (req, res) => {
   const { url } = req.body;
   try {
     const response = await axios.get(url);
     const users = response.data;
-    users.forEach(user => {
-      db.query('INSERT INTO users (username, email, firstname, lastname, password, is_admin) VALUES (?, ?, ?, ?, ?, ?)',
-        [user.username, user.email, user.firstname, user.lastname, bcrypt.hashSync(user.password, 10), user.is_admin || 0]);
-    });
+
+    for (const user of users) {
+      const hashedPassword = await bcrypt.hash(user.password, 10);
+      await queryDb(
+        'INSERT INTO users (username, email, firstname, lastname, password, is_admin) VALUES (?, ?, ?, ?, ?, ?)',
+        [user.username, user.email, user.firstname, user.lastname, hashedPassword, user.is_admin || 0]
+      );
+    }
+
     res.json({ message: 'Usuarios importados' });
   } catch (err) {
-    //Include also the error message in the response
     console.error('Error al importar usuarios:', err.message);
-    res.status(500).json({ message: 'Error al importar', error: res.data });
+    res.status(500).json({ message: 'Error al importar', error: err.message });
   }
 });
 
-// Cargar usuarios desde XML (XXE vulnerable)
-app.post('/api/v1/users/import-xml', authenticateUser, (req, res) => {
-  //if (!req.user.is_admin) return res.status(403).json({ message: 'No autorizado' });
+// Import users from XML (vulnerable to XML External Entity attacks)
+app.post('/api/v1/users/import-xml', authenticateUser, async (req, res) => {
   const xml = req.body.xml;
-  const parser = new xml2js.Parser({ explicitArray: false});
-  parser.parseString(xml, (err, result) => {
-    if (err) return res.status(500).json({ message: 'Error al procesar XML' });
-    const users = result.users.user;
-    try {
-      console.log('Usuarios a insertar:', users);
-      users.forEach(user => {
-        console.log('Insertando usuario:', user.username);
-        const isAdmin = user.is_admin === 'true' || user.is_admin === 1 ? 1 : 0
-        db.query('INSERT INTO users (username, email, firstname, lastname, password, is_admin) VALUES (?, ?, ?, ?, ?, ?)',
-          [user.username, user.email, user.firstname, user.lastname, bcrypt.hashSync(user.password, 10), isAdmin],(err, result) => {
-            if (err) {
-              console.error('❌ Error en la inserción:', err.message);
-            } else {
-              console.log('✅ Usuario insertado con éxito:', result.insertId);
-            }
-          });
-        });
-        res.json({ message: 'Usuarios importados desde XML' });
-      } catch (error) {
-        console.error('Error al insertar usuarios:', error);
-        res.status(500).json({ message: 'Error al insertar usuarios' });
-      }
-    });
+  const parser = new xml2js.Parser({ explicitArray: false });
+
+  try {
+    const result = await parser.parseStringPromise(xml);
+    let users = result.users.user;
+    if (!Array.isArray(users)) users = [users]; // Normalizar array
+
+    for (const user of users) {
+      const isAdmin = user.is_admin === 'true' || user.is_admin === 1 ? 1 : 0;
+      const hashedPassword = await bcrypt.hash(user.password, 10);
+
+      await queryDb(
+        'INSERT INTO users (username, email, firstname, lastname, password, is_admin) VALUES (?, ?, ?, ?, ?, ?)',
+        [user.username, user.email, user.firstname, user.lastname, hashedPassword, isAdmin]
+      );
+      console.log('Usuario insertado con éxito:', user.username);
+    }
+
+    res.json({ message: 'Usuarios importados desde XML' });
+  } catch (error) {
+    console.error('Error al insertar usuarios:', error);
+    res.status(500).json({ message: 'Error al insertar usuarios' });
+  }
 });
 
-// Ping inseguro
+
+// Insecure ping 
 app.post('/api/v1/ping', authenticateUser, (req, res) => {
   const  host  = req.body.host;
   console.log('Haciendo ping a:', host);
@@ -389,213 +357,131 @@ app.post('/api/v1/ping', authenticateUser, (req, res) => {
   });
 });
 
-
-
-  // Listar todos los blogs
-  app.get('/api/v1/blogs', authenticateUser, (req, res) => {
-    try {
-      let query;
-      const params = [];
-
-      if (req.user) {
-        // Usuario autenticado: obtener todos los blogs
-        query = 'SELECT * FROM blogs';
-      } else {
-        // Usuario no autenticado: obtener solo blogs públicos
-        query = 'SELECT * FROM blogs WHERE is_private = false';
-      }
-
-      db.query(query, params, (err, results) => {
-        if (err) {
-          console.error('Error al obtener los blogs:', err);
-          return res.status(500).json({ message: 'Error al obtener los blogs.', details: err.message });
-        }
-
-        res.json(results);
-      });
-    } catch (error) {
-      console.error('Error inesperado:', error);
-      res.status(500).json({ message: 'Error inesperado al obtener los blogs.', details: error.message });
+// List the blogs
+app.get('/api/v1/blogs', authenticateUser, async (req, res) => {
+  try {
+    let query;
+    if (req.user) {
+      query = 'SELECT * FROM blogs';
+    } else {
+      query = 'SELECT * FROM blogs WHERE is_private = false';
     }
-  });
+    const results = await queryDb(query);
+    res.json(results);
+  } catch (err) {
+    console.error('Error al obtener los blogs:', err);
+    res.status(500).json({ message: 'Error al obtener los blogs.', details: err.message });
+  }
+});
 
-
-// Obtener un blog por ID, pendiente de definir
+// Get a specific blog by ID
 app.get('/api/v1/blog/:blog_id', async (req, res) => {
   const { blog_id } = req.params;
-
-    const query = 'SELECT * FROM blogs WHERE id = ?';
-    
-    db.query(query, [blog_id], (err, results) => {
-        if (err) {
-            console.error('Error al obtener el blog:', err);
-            return res.status(500).json({ error: 'Error interno del servidor' });
-        }
-
-        if (results.length === 0) {
-            return res.status(404).json({ error: 'Blog no encontrado' });
-        }
-
-        res.json(results[0]);
-    });
-});
-
-// Poner comentarios en un blog
-app.post('/api/v1/blog/:blog_id/comments', authenticateUser, uploadCommentFiles.array('files'), (req, res) => {
-    // 1. Extraer datos de la solicitud
-    const { blog_id } = req.params;
-    const { content } = req.body;
-    const username = 'Anónimo';
-    if (req.user) username = req.user.username;
-
-    // 2. Validación: Asegurarse de que el comentario no esté vacío
-    if (!content) {
-        return res.status(400).json({ message: 'El comentario no puede estar vacío' });
+  try {
+    const results = await queryDb('SELECT * FROM blogs WHERE id = ?', [blog_id]);
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'Blog no encontrado' });
     }
-
-  // 3. Guardar el comentario en la base de datos
-  db.query(
-      "INSERT INTO comments (blog_id, writer, comment) VALUES (?, ?, ?)", 
-      [blog_id, username, content],
-      (error, result) => {
-          if (error) {
-              console.error('Error al insertar el comentario:', error);
-              return res.status(500).json({ message: 'Hubo un error al agregar el comentario.' });
-          }
-
-          const commentId = result.insertId;
-
-          // 4. Si hay archivos, guardarlos en la base de datos
-          const files = req.files.map(file => ({
-              comment_id: commentId,
-              file_path: `/uploads/${file.filename}`,
-          }));
-
-          if (files.length > 0) {
-              const fileInsertQuery = "INSERT INTO comment_files (comment_id, file_path) VALUES ?";
-
-              // Insertar los archivos en la base de datos
-              db.query(fileInsertQuery, [files.map(f => [f.comment_id, f.file_path])], (err, fileResult) => {
-                  if (err) {
-                      console.error('Error al insertar los archivos:', err);
-                      return res.status(500).json({ message: 'Hubo un error al agregar los archivos.' });
-                  }
-              });
-          }
-
-          // 5. Responder con el comentario creado
-          res.status(201).json({
-              message: 'Comentario agregado con éxito',
-              comment: {
-                  id: commentId,
-                  content,
-                  author: username,
-                  files
-              }
-          });
-      }
-  );
+    res.json(results[0]);
+  } catch (err) {
+    console.error('Error al obtener el blog:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
-// Ver los comentarios del blogs
-app.get('/api/v1/blog/:blog_id/comments', authenticateUser, uploadCommentFiles.array('files'), (req, res) => {
-
+// Comment a blog
+app.post('/api/v1/blog/:blog_id/comments', authenticateUser, uploadCommentFiles.array('files'), async (req, res) => {
   const { blog_id } = req.params;
+  const { content } = req.body;
+  let username = 'Anónimo';
+  if (req.user) username = req.user.username;
 
-   // 1. Obtener los comentarios del blog desde la base de datos
-   db.query(
-    "SELECT * FROM comments WHERE blog_id = ?",
-    [blog_id],
-    (err, comments) => {
-        if (err) {
-            console.error('Error al obtener los comentarios: ', err);
-            return res.status(500).json({ message: 'Error al obtener los comentarios' });
-        }
-
-        // 2. Para cada comentario, obtenemos los archivos asociados
-        const getFilesForComment = (commentId) => {
-            return new Promise((resolve, reject) => {
-                db.query(
-                    "SELECT * FROM comment_files WHERE comment_id = ?",
-                    [commentId],
-                    (err, files) => {
-                        if (err) {
-                            return reject('Error al obtener los archivos de los comentarios');
-                        }
-                        resolve(files);
-                    }
-                );
-            });
-        };
-
-        // 3. Mapear los comentarios para incluir los archivos
-        const commentsWithFilesPromises = comments.map(async (comment) => {
-            const files = await getFilesForComment(comment.id);
-            return {
-                ...comment,
-                files: files.map(file => ({
-                    file_path: file.file_path,
-                })),
-            };
-        });
-
-        // 4. Esperar a que se resuelvan todos los comentarios con sus archivos
-        Promise.all(commentsWithFilesPromises)
-            .then(commentsWithFiles => {
-                // 5. Responder con los comentarios y archivos
-                res.status(200).json({
-                    comments: commentsWithFiles,
-                });
-            })
-            .catch((error) => {
-                console.error('Error al obtener los comentarios con archivos: ', error);
-                res.status(500).json({ message: 'Error al procesar los comentarios' });
-            });
-    }
-);
-});
-
-//Crear un nuevo blog
-app.post('/api/v1/blog', authenticateUser, (req, res) => {
-  const { title, content, author, url, is_private } = req.body;
-  if (!title || !content) {
-      return res.status(400).json({ message: 'El título y el contenido son obligatorios.' });
+  if (!content) {
+    return res.status(400).json({ message: 'El comentario no puede estar vacío' });
   }
 
-  let authorName = author || 'Anónimo'; // Nombre predeterminado si no se proporciona
+  try {
+    // Insertar comentario
+    const result = await queryDb(
+      "INSERT INTO comments (blog_id, writer, comment) VALUES (?, ?, ?)", 
+      [blog_id, username, content]
+    );
 
-  if (req.user) { // Si el usuario está autenticado, sobrescribir el autor con su nombre completo.
-      const userId = req.user.id;
-      const queryUser = 'SELECT firstname, lastname FROM users WHERE id = ?';
+    const commentId = result.insertId;
 
+    // Insertar archivos asociados si existen
+    const files = req.files.map(file => [commentId, `/uploads/${file.filename}`]);
 
-      db.query(queryUser, [userId], (err, results) => {
-          if (!err && results.length > 0) {
-              authorName = `${results[0].firstname} ${results[0].lastname}`;
-          }
+    if (files.length > 0) {
+      await queryDb(
+        "INSERT INTO comment_files (comment_id, file_path) VALUES ?",
+        [files]
+      );
+    }
 
-          // Insertar el blog en la base de datos
-          const queryBlog = 'INSERT INTO blogs (title, content, author, url, is_private) VALUES (?, ?, ?, ?, ?)';
-          db.query(queryBlog, [title, content, authorName, url, is_private], (err, result) => {
-              if (err) {
-                  console.error('Error al insertar el blog:', err);
-                  return res.status(500).json({ message: 'Error al crear el blog.' });
-              }
+    res.status(201).json({
+      message: 'Comentario agregado con éxito',
+      comment: {
+        id: commentId,
+        content,
+        author: username,
+        files: files.map(f => ({ file_path: f[1] }))
+      }
+    });
+  } catch (err) {
+    console.error('Error al insertar el comentario o archivos:', err);
+    res.status(500).json({ message: 'Hubo un error al agregar el comentario o archivos.' });
+  }
+});
 
-              res.status(201).json({ message: 'Blog creado con éxito', blogId: result.insertId });
-          });
-      });
-  } else {
-      // Si no hay usuario autenticado, insertar directamente con el autor proporcionado o "Anónimo"
-      const queryBlog = 'INSERT INTO blogs (title, content, author, url) VALUES (?, ?, ?, ?)';
-      db.query(queryBlog, [title, content, authorName, url], (err, result) => {
-          if (err) {
-              console.error('Error al insertar el blog:', err);
-              return res.status(500).json({ message: 'Error al crear el blog.' });
-          }
+// Ver los comentarios del blog con sus archivos
+app.get('/api/v1/blog/:blog_id/comments', authenticateUser, async (req, res) => {
+  const { blog_id } = req.params;
 
-          res.status(201).json({ message: 'Blog creado con éxito', blogId: result.insertId });
-      });
+  try {
+    const comments = await queryDb("SELECT * FROM comments WHERE blog_id = ?", [blog_id]);
+
+    // Para cada comentario, obtener archivos
+    const commentsWithFiles = await Promise.all(comments.map(async (comment) => {
+      const files = await queryDb("SELECT * FROM comment_files WHERE comment_id = ?", [comment.id]);
+      return {
+        ...comment,
+        files: files.map(file => ({ file_path: file.file_path })),
+      };
+    }));
+
+    res.status(200).json({ comments: commentsWithFiles });
+  } catch (err) {
+    console.error('Error al obtener comentarios con archivos:', err);
+    res.status(500).json({ message: 'Error al procesar los comentarios' });
+  }
+});
+
+// Create a new blog
+app.post('/api/v1/blog', authenticateUser, async (req, res) => {
+  const { title, content, author, url, is_private } = req.body;
+  if (!title || !content) {
+    return res.status(400).json({ message: 'El título y el contenido son obligatorios.' });
+  }
+
+  let authorName = author || 'Anónimo';
+
+  try {
+    if (req.user) {
+      // Obtener nombre completo del usuario autenticado
+      const results = await queryDb('SELECT firstname, lastname FROM users WHERE id = ?', [req.user.id]);
+      if (results.length > 0) {
+        authorName = `${results[0].firstname} ${results[0].lastname}`;
+      }
+    }
+
+    const queryBlog = 'INSERT INTO blogs (title, content, author, url, is_private) VALUES (?, ?, ?, ?, ?)';
+    const result = await queryDb(queryBlog, [title, content, authorName, url, is_private || false]);
+
+    res.status(201).json({ message: 'Blog creado con éxito', blogId: result.insertId });
+  } catch (err) {
+    console.error('Error al crear el blog:', err);
+    res.status(500).json({ message: 'Error al crear el blog.' });
   }
 });
 
