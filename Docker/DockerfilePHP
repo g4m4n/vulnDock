@@ -10,10 +10,19 @@ RUN chown -R www-data:www-data /var/www/html \
 
 # Instala las extensiones necesarias
 RUN apt-get update && \
-    apt-get install -y iputils-ping && \
-    docker-php-ext-install pdo pdo_mysql mysqli && \
+    apt-get install -y  gnupg2 iputils-ping  libpq-dev unixodbc-dev libssl-dev  && \
+    docker-php-ext-install pdo pdo_mysql mysqli pdo_pgsql && \
     docker-php-ext-enable mysqli && \
-    a2enmod rewrite
+    a2enmod rewrite 
+
+# Instalación de drivers de Microsoft para SQL Server (pdo_sqlsrv)
+RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
+    curl https://packages.microsoft.com/config/debian/10/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && ACCEPT_EULA=Y apt-get install -y \
+    msodbcsql17 \
+    mssql-tools \
+    && pecl install pdo_sqlsrv \
+    && docker-php-ext-enable pdo_sqlsrv
 
 # Copy the frontend files to the container
 COPY ../Frontend/public ./

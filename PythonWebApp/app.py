@@ -2,15 +2,13 @@ from flask import Flask, request, jsonify, render_template_string, redirect, url
 import os
 import bcrypt
 import requests
-import uuid
-import hashlib
 import json
 import base64
 from werkzeug.utils import secure_filename
 import xml.etree.ElementTree as ET
 from io import StringIO
 import subprocess
-import dbconnector
+import PythonWebApp.DatabaseConnector as DatabaseConnector
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'public/images/avatars'
@@ -79,7 +77,7 @@ def register():
         # Insertar usuario en base de datos
         try:
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-            dbconnector.query_db(f"INSERT INTO users (username, firstname, lastname, email, password, avatar) VALUES ({username}, {firstname}, {lastname}, {email}, {hashed_password}, {avatar_path})",
+            DatabaseConnector.query_db(f"INSERT INTO users (username, firstname, lastname, email, password, avatar) VALUES ({username}, {firstname}, {lastname}, {email}, {hashed_password}, {avatar_path})",
                 (username, firstname, lastname, email, hashed_password, avatar_path)
             )
             return jsonify({'message': 'Usuario registrado exitosamente'}), 201
@@ -95,7 +93,7 @@ def login():
         username = request.form['username']
         password = request.form['password']
         print(f"Intentando iniciar sesión con usuario: {username} y contraseña: {password}")
-        user = dbconnector.query_db("SELECT * FROM users WHERE username = %s", (username,))
+        user = DatabaseConnector.query_db("SELECT * FROM users WHERE username = %s", (username,))
 
         if not user:
             return jsonify({'message': 'Usuario o contraseña incorrectos'}), 401
@@ -139,7 +137,7 @@ def user_me():
             return jsonify({'message': 'Sesión inválida'}), 401
 
         # Consultar usuario en la base de datos
-        user = dbconnector.query_db("SELECT id, username, firstname, lastname, email, avatar FROM users WHERE id = %s", (user_id,))
+        user = DatabaseConnector.query_db("SELECT id, username, firstname, lastname, email, avatar FROM users WHERE id = %s", (user_id,))
 
         if user:
             return jsonify(user[0]), 200
@@ -187,7 +185,7 @@ def update_profile():
         query += f" WHERE id = {user_id}"
 
         # Ejecutar la consulta (SQL Injection posible)
-        dbconnector.query_db(query)
+        DatabaseConnector.query_db(query)
 
         return jsonify({'message': 'Perfil actualizado con éxito'}), 200
 
@@ -207,13 +205,13 @@ def list_users():
         user_data = json.loads(base64.b64decode(session_cookie).decode())
         user_id = user_data.get('id')
         # Obtener los datos del usuario desde la base de datos (sin sanitización ni controles adecuados)
-        user = dbconnector.query_db(f"SELECT is_admin FROM users WHERE id = {user_id}" )
+        user = DatabaseConnector.query_db(f"SELECT is_admin FROM users WHERE id = {user_id}" )
         # No verificar si el usuario existe antes de acceder a sus datos
         if not user[0]['is_admin']:  
             return jsonify({'message': 'No autorizado'}), 403
 
         # Consulta sin paginación ni filtros (podría ser explotado para extraer grandes volúmenes de datos)
-        users = dbconnector.query_db("SELECT id, username, email, is_admin FROM users")
+        users = DatabaseConnector.query_db("SELECT id, username, email, is_admin FROM users")
     except Exception as err:
         print(f"Error al listar usuarios: {err}")
         return jsonify({'message': 'Error interno del servidor'}), 500
@@ -226,7 +224,7 @@ def toggle_admin(user_id):
     # Consulta SQL sin validaciones ni confirmaciones de seguridad
     query = "UPDATE users SET is_admin = NOT is_admin WHERE id = %s"
     
-    result = dbconnector.query_db(query, (user_id,))
+    result = DatabaseConnector.query_db(query, (user_id,))
 
     # No se comprueba si el usuario realmente existe antes de modificarlo
     if result == 0:
@@ -249,7 +247,7 @@ def delete_user(user_id):
             user_admin = user_data.get('is_admin')
 
             if user_admin:
-                dbconnector.query_db("DELETE FROM users WHERE id = %s", (user_id,))
+                DatabaseConnector.query_db("DELETE FROM users WHERE id = %s", (user_id,))
                 return  jsonify({'message' : 'Usuario eliminado'}), 403
             return jsonify({'message': 'Usuario eliminado'}), 200
 
@@ -271,7 +269,7 @@ def import_users():
 
         for user in users_data:
             print(f"Importando usuario: {user}")  # Registro de depuración
-            dbconnector.query_db(
+            DatabaseConnector.query_db(
                 "INSERT INTO users (username, firstname, lastname, email, password) VALUES (%s, %s, %s, %s, %s)",
                 (user['username'], user['firstname'], user['lastname'], user['email'], user['password'])
             )
@@ -298,7 +296,7 @@ def import_users_xml():
         users = root.findall('user')
 
         for user in users:
-            dbconnector.query_db(
+            DatabaseConnector.query_db(
                 "INSERT INTO users (username, firstname, lastname, email, password) VALUES (%s, %s, %s, %s, %s)",
                 (user.find('username').text, user.find('firstname').text, user.find('lastname').text, user.find('email').text, user.find('password').text)
             )
@@ -329,7 +327,7 @@ def get_blogs():
             # Si no está autenticado, aún puede obtener blogs privados
             query = "SELECT * FROM blogs WHERE is_private = false"  
 
-        blogs = dbconnector.query_db(query)  # Consulta sin sanitización ni manejo de errores
+        blogs = DatabaseConnector.query_db(query)  # Consulta sin sanitización ni manejo de errores
 
         return jsonify(blogs)
     except Exception as error:
@@ -341,7 +339,7 @@ def get_blogs():
 def get_blog_by_id(blog_id):
     try:
         query = f"SELECT * FROM blogs WHERE id = {blog_id}" 
-        blog = dbconnector.query_db(query)  # Ejecuta la consulta sin sanitización
+        blog = DatabaseConnector.query_db(query)  # Ejecuta la consulta sin sanitización
 
         if not blog:
             return jsonify({'error': 'Blog no encontrado'}), 404
@@ -366,22 +364,22 @@ def add_comment(blog_id):
             user_id = user_data.get('id')
             print(f"ID de usuario: {user_id}")
             # Obtener los datos del usuario desde la base de datos (sin sanitización ni controles adecuados)
-            user = dbconnector.query_db(f"SELECT is_admin FROM users WHERE id = {user_id}" )
+            user = DatabaseConnector.query_db(f"SELECT is_admin FROM users WHERE id = {user_id}" )
         
             if user is not None:
-                user = dbconnector.query_db(f"SELECT username FROM users WHERE id = {user_id}")  # 🔥 INYECCIÓN SQL 🔥
+                user = DatabaseConnector.query_db(f"SELECT username FROM users WHERE id = {user_id}")  # 🔥 INYECCIÓN SQL 🔥
                 if user:
                     username = user[0]['username']  # Sin validaciones ni sanitización
 
         # Comentario vacío permitido
         print(f"Contenido del comentario: {username} - {content}")
         query = f"INSERT INTO comments (blog_id, writer, comment) VALUES ({blog_id}, '{username}', '{content}')"  
-        dbconnector.query_db(query) 
+        DatabaseConnector.query_db(query) 
 
         # Obtener el último ID insertado (SIN SEGURIDAD)
         # comment_id = dbconnector.query_db("SELECT LAST_INSERT_ID()")
 
-        comment_id = dbconnector.query_db(f"SELECT MAX(id) FROM comments WHERE blog_id = {blog_id}")
+        comment_id = DatabaseConnector.query_db(f"SELECT MAX(id) FROM comments WHERE blog_id = {blog_id}")
 
         print(f"ID del comentario insertado: {comment_id[0]['MAX(id)']}")  # Sin validaciones ni sanitización
         # Guardar archivos (sin validación de tipo ni tamaño)
@@ -394,7 +392,7 @@ def add_comment(blog_id):
             full_path = f"./public/uploads/{file.filename}"  # Ruta real en el disco (relativa al proyecto)
             file.save(full_path)
             query = f"INSERT INTO comment_files (comment_id, file_path) VALUES ({comment_id[0]['MAX(id)']}, '{file_path}')"
-            result = dbconnector.query_db(query)  
+            result = DatabaseConnector.query_db(query)  
             print(f"Archivo guardado: {file_path} con resultado: {result}")
             file_entries.append({'comment_id': comment_id[0]['MAX(id)'], 'file_path': file_path})
 
@@ -419,14 +417,14 @@ def get_comments(blog_id):
     try:
         # Obtener comentarios del blog sin sanitizar entradas
         comments_query = f"SELECT * FROM comments WHERE blog_id = {blog_id}"
-        comments = dbconnector.query_db(comments_query)  
+        comments = DatabaseConnector.query_db(comments_query)  
 
         comments_with_files = []
         for comment in comments:
             # Obtener archivos sin sanitización 
             print(f"Obteniendo archivos para el comentario ID: {comment['id']}")
             files_query = f"SELECT * FROM comment_files WHERE comment_id = {comment['id']}"
-            files = dbconnector.query_db(files_query)
+            files = DatabaseConnector.query_db(files_query)
 
             comments_with_files.append({
                 **comment,
@@ -460,14 +458,14 @@ def create_blog():
         if 'user_id' in session:
             user_id = session['user_id']
             query_user = f"SELECT firstname, lastname FROM users WHERE id = {user_id}"  
-            user_data = dbconnector.query_db(query_user)
+            user_data = DatabaseConnector.query_db(query_user)
 
             if user_data:
                 author = f"{user_data[0]['firstname']} {user_data[0]['lastname']}"
 
         # Insertar en la base de datos SIN sanitización
         query_blog = f"INSERT INTO blogs (title, content, author, url, is_private) VALUES ('{title}', '{content}', '{author}', '{url}', {is_private})" 
-        dbconnector.query_db(query_blog)
+        DatabaseConnector.query_db(query_blog)
 
         return jsonify({'message': 'Blog creado con éxito'}), 201
 

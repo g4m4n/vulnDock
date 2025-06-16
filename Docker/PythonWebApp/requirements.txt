@@ -1,5 +1,0 @@
-Flask
-bcrypt
-mysql-connector-python
-gunicorn
-requests
