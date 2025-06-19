@@ -1,0 +1,27 @@
+version: '3'
+
+services:  
+  db:
+    container_name: vulndock-database
+    build: 
+      context: .
+      dockerfile: Docker/DockerfileMSSQL
+    ports:
+      - "1433:1433"
+    networks:
+      - mynetwork
+
+  web:
+    container_name: vulndock-web
+    build: 
+      context: .
+      dockerfile: Docker/DockerfilePHPWin
+    ports:
+      - "80:80"
+    depends_on:
+      - db
+    networks:
+      - mynetwork
+networks:
+  mynetwork:
+    driver: bridge  # Usamos la red por defecto de Docker
