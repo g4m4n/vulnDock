@@ -29,7 +29,7 @@ function Show-Help {
     Write-Host ""
     Write-Host "Options:"
     Write-Host "  --os-system <linux|windows>       Specify the operating system"
-    Write-Host "  --database <mysql|postgresql|mssql> Specify the database"
+    Write-Host "  --database <mysql|postgres|mssql> Specify the database"
     Write-Host "  --language <javascript|java|python|php|csharp> Specify the programming language"
     Write-Host "  --help                           Show this help message"
     Write-Host ""
@@ -53,18 +53,18 @@ function Prompt-Choice($prompt, $options) {
 
 # Parse command line arguments manually to allow --flag value style
 $validOsOptions = @("linux", "windows")
-$validDbOptions = @("mysql", "postgresql", "mssql")
+$validDbOptions = @("mysql", "postgres", "mssql")
 $validLangOptions = @("javascript", "java", "python", "php", "csharp")
 
 $dockerfilesDb = @{
     "windows" = @{
         "mysql" = "Docker/DockerfileMySQLWin"
-        "postgresql" = "Docker/DockerfilePostgresWin"
+        "postgres" = "Docker/DockerfilePostgresWin"
         "mssql" = "Docker/DockerfileMSSQL"
     }
     "linux" = @{
         "mysql" = "Docker/DockerfileMySQL"
-        "postgresql" = "Docker/DockerfilePostgres"
+        "postgres" = "Docker/DockerfilePostgres"
         "mssql" = "Docker/DockerfileMSSQL"
     }
 }
@@ -87,14 +87,40 @@ $dockerfilesWeb = @{
 }
 
 $backendFolders = @{ "php" = ".\PHPWebapp"; "javascript" = ".\NodeJSWebapp"; "java" = ".\JavaWebapp"; "csharp" = ".\ASPNETWebapp"; "python" = ".\PythonWebapp" }
+$relativeConnectorPaths = @{ "php" = "services"; "javascript" = "."; "java" = "app\src\webapp\app\main"; "csharp" = "Services"; "python" = "." }
+$extensions = @{ "php" = "php"; "javascript" = "js"; "java" = "java"; "csharp" = "cs"; "python" = "py" }
+function Replace-DbConnector {
+    param(
+        [string]$language,
+        [string]$database
+    )
 
-function Get-DbConnectorFile {
-    param([string]$language, [string]$database)
-    $ext = switch ($language) { "php" {"php"}; "javascript" {"js"}; "java" {"java"}; "csharp" {"cs"}; "python" {"py"} }
-    $fileName = "$language" + "_" + "$database" + "." + "$ext"
-    $filePath = Join-Path -Path "..\DbConnectors" -ChildPath $fileName
-    if (Test-Path $filePath) { return $filePath } else { return $null }
+    if (-not $backendFolders.ContainsKey($language) -or
+        -not $relativeConnectorPaths.ContainsKey($language) -or
+        -not $extensions.ContainsKey($language)) {
+        Write-Warning "Lenguaje no soportado: $language"
+        return
+    }
+
+    $backendRoot = $backendFolders[$language]
+    $relativePath = $relativeConnectorPaths[$language]
+    $ext = $extensions[$language]
+
+    $connectorDir = if ($relativePath -eq ".") { $backendRoot } else { Join-Path $backendRoot $relativePath }
+
+    $sourceFile = Join-Path $connectorDir "$database.$ext"
+    $destinationFile = Join-Path $connectorDir "DatabaseConnector.$ext"
+
+
+    if (-not (Test-Path $sourceFile)) {
+        Write-Warning "Archivo origen no encontrado: $sourceFile"
+        return
+    }
+
+    Write-Host "Copiando $sourceFile -> $destinationFile"
+    Copy-Item -Path $sourceFile -Destination $destinationFile -Force
 }
+
 
 function Prompt-Choice($prompt, $options) {
     Write-Host $prompt
@@ -117,7 +143,7 @@ services:
       context: .
       dockerfile: $dockerfileDb
     ports:
-      - "$(if ($db -eq "mssql") {"1433"} elseif ($db -eq "postgresql") {"5432"} else {"3306"}):$(if ($db -eq "mssql") {"1433"} elseif ($db -eq "postgresql") {"5432"} else {"3306"})"
+      - "$(if ($db -eq "mssql") {"1433"} elseif ($db -eq "postgres") {"5432"} else {"3306"}):$(if ($db -eq "mssql") {"1433"} elseif ($db -eq "postgres") {"5432"} else {"3306"})"
     networks:
       - mynetwork
 
@@ -241,6 +267,7 @@ $database = Prompt-Choice "Select DB:" $validDbOptions
 $language = Prompt-Choice "Select Language:" $validLangOptions
 
 $composeContent = Build-DockerComposeDynamic -os $osSystem -db $database -lang $language
+Replace-DbConnector -language $language -database $database
 Set-Content -Path "docker-compose.yml" -Value $composeContent -Encoding UTF8
 Write-Host "Generated docker-compose.yml"
 
@@ -250,11 +277,10 @@ Write-Host "Starting Docker..."
 
 
 Inicialize-Docker
+Sleep 10
 Ensure-DockerEngineMatchesOSSystem -osSystem $osSystem
+sleep 10
 docker-compose up -d
-
-Write-Host "Running. Press Ctrl+C to stop..."
-
 
 Write-Host "Press 'q' to quit and cleanup..."
 

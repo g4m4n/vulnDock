@@ -1,37 +1,37 @@
-import mysql.connector 
-from mysql.connector import Error
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
-# Configuración de la base de datos
 def connect_db():
     try:
-        connection = mysql.connector.connect(
+        connection = psycopg2.connect(
             host='db',
-            user='app_user',
-            password='app_password',
-            database='web_app'
+            user='admin',
+            password='admin',
+            dbname='web_app'
         )
-        if connection.is_connected():
-            print('Conectado a la base de datos')
-            return connection
-    except Error as e:
+        print('Conectado a la base de datos (PostgreSQL)')
+        return connection
+    except Exception as e:
         print(f'Error de conexión: {e}')
         return None
 
 def close_connection(connection):
-    if connection.is_connected():
-        connection.close()
-        print('Conexión cerrada')
+    connection.close()
+    print('Conexión cerrada')
 
 def query_db(query, params=None):
     connection = connect_db()
     if connection:
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
         try:
             cursor.execute(query, params)
-            result = cursor.fetchall()
+            if query.strip().lower().startswith("select"):
+                result = cursor.fetchall()
+            else:
+                result = {'affected_rows': cursor.rowcount}
             connection.commit()
             return result
-        except Error as e:
+        except Exception as e:
             print(f'Error en la consulta: {e}')
             return None
         finally:
