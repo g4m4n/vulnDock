@@ -288,11 +288,16 @@ while ($true) {
     $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     if ($key.Character -eq 'q') {
         Write-Host "`n'q' pressed. Cleaning up..."
-        docker-compose down
+        $deleteContainer = Read-Host "Delete Docker container? (Y/N)"
+        if ($deleteContainer.ToUpper() -eq 'Y') {
+            docker-compose down --volumes --remove-orphans
+        } else {
+            docker-compose stop
+        }        
         if ($osSystem -eq "windows") { Remove-FoldersForWindows }
         $deleteImg = Read-Host "Delete Docker images? (Y/N)"
         if ($deleteImg.ToUpper() -eq 'Y') {
-            docker rmi -f vulndock-database vulndock-web
+            docker rmi -f vulndock-db vulndock-web
         }
         break
     }

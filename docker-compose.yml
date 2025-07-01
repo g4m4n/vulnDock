@@ -1,0 +1,28 @@
+﻿version: '3'
+
+services:
+  db:
+    container_name: vulndock-database
+    build:
+      context: .
+      dockerfile: Docker/DockerfilePostgres
+    ports:
+      - "5432:5432"
+    networks:
+      - mynetwork
+
+  web:
+    container_name: vulndock-web
+    build:
+      context: .
+      dockerfile: Docker/DockerfilePython
+    ports:
+      - "80:80"
+    depends_on:
+      - db
+    networks:
+      - mynetwork
+
+networks:
+  mynetwork:
+    driver: bridge
