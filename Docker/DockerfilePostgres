@@ -1,5 +1,6 @@
 # Docker Image for PostgreSQL on Linux (Debian-based)
-FROM postgres:17.5
+ARG DB_VERSION=17.5
+FROM postgres:${DB_VERSION}
 
 # Variables de entorno (ya vienen en la imagen oficial, pero las dejamos explícitas)
 ENV POSTGRES_PASSWORD=admin

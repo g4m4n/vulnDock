@@ -1,4 +1,5 @@
 # Usa una imagen base que ya trae Maven + JDK 21
+ARG WEB_VERSION=21
 FROM maven:3.9.6-eclipse-temurin-21 AS build
 
 # Establece el directorio de trabajo donde se construirá la app
@@ -17,7 +18,7 @@ COPY ../JavaWebapp/app/src ./src
 RUN mvn clean package -DskipTests
 
 # Etapa final: usa una imagen más ligera solo con el JDK
-FROM openjdk:21-jdk-slim
+FROM openjdk:${WEB_VERSION}-jdk-slim
 
 # Instala el comando `ping`
 RUN apt-get update && apt-get install -y iputils-ping && rm -rf /var/lib/apt/lists/*

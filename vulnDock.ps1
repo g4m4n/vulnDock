@@ -249,7 +249,6 @@ function Ensure-DockerEngineMatchesOSSystem {
             Write-Host "Switching Docker engine to $osSystem..."
             Invoke-Expression $switchCmd
             Write-Host "Docker is switching engines. Please wait and restart this script afterward."
-            exit 0
         } else {
             Write-Warning "Docker engine not changed. The script may not work correctly."
         }

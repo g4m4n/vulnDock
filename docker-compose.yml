@@ -5,9 +5,9 @@ services:
     container_name: vulndock-database
     build:
       context: .
-      dockerfile: Docker/DockerfilePostgres
+      dockerfile: Docker/DockerfileMySQL
     ports:
-      - "5432:5432"
+      - "3306:3306"
     networks:
       - mynetwork
 
